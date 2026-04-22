@@ -1,7 +1,0 @@
-fastapi[standard]==0.120.1
-sqlalchemy==2.0.44
-pydantic==2.12.3
-timescaledb==0.0.4
-sqlmodel==0.0.27
-uvicorn==0.38.0
-gunicorn
