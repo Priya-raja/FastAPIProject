@@ -1,135 +1,74 @@
-from typing import Any
-from fastapi import FastAPI,HTTPException
+"""FastAPI application for shipment management."""
+
+from fastapi import FastAPI, HTTPException, status
 from scalar_fastapi import get_scalar_api_reference
+from contextlib import asynccontextmanager
+from rich import print, panel
+from schemas import ShipmentCreate, ShipmentRead, ShipmentStatus, ShipmentUpdate
+from database import Database
+from database.session import create_db_and_tables
 
-from schemas import Shipment
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # print("[green]Starting up...[/green]")
+    # print(panel.Panel("Starting up", border_style="blue"))
+    create_db_and_tables()
+    yield
+    print("[red]Shutting down...[/red]")
+    print(panel.Panel("Shutting down", border_style="red"))
+
+
+app = FastAPI(lifespan=lifespan)
+
+db = Database()
+db.connect_to_db()
+def _get_shipment_or_404(shipment_id: int) -> dict[str, str | float | int]:
+    """Return a shipment record or raise a 404 error if it is missing."""
+    shipment = db.get(shipment_id)
+    if shipment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Given id doesn't exist!",
+        )
+    return shipment
+
+
+@app.get("/shipment", response_model=ShipmentRead)
+def get_shipment(shipment_id: int) -> dict[str, str | float | int]:
 
    
-
-shipments = {
-    12701: {
-        "weight": .6,
-        "content": "glassware",
-        "status": "placed"
-    },
-    12702: {
-        "weight": 2.3,
-        "content": "books",
-        "status": "shipped"
-    },
-    12703: {
-        "weight": 1.1,
-        "content": "electronics",
-        "status": "delivered"
-    },
-    12704: {
-        "weight": 3.5,
-        "content": "furniture",
-        "status": "in transit"
-    },
-    12705: {
-        "weight": .9,
-        "content": "clothing",
-        "status": "returned"
-    },
-    12706: {
-        "weight": 4.0,
-        "content": "appliances",
-        "status": "processing"
-    },
-    12707: {
-        "weight": 1.8,
-        "content": "toys",
-        "status": "placed"
-    },
-}
+    """Fetch a single shipment by its identifier."""
+    return _get_shipment_or_404(shipment_id)
 
 
-@app.get("/shipment/latest")
-def get_latest_shipment() -> dict[str, Any]:
-    id = max(shipments.keys())
-    return shipments[id]
-
-
-@app.get("/shipment/{id}")
-def get_shipment(id: int) -> dict[str, Any]:
-
-    if id not in shipments:
-       
-       raise HTTPException(status_code=404, detail="Shipment not found")
-
-    return shipments[id]
-
-# Post a new shipment
-@app.post("/shipment")
-
-def submit_shipment(shipment: Shipment) -> dict[str, int]:
-    new_id = max(shipments.keys()) + 1
-    
-    shipments[new_id]={
-        "weight": shipment.weight,
-        "content": shipment.content,
-        "status": "placed"
-    }
+@app.post("/shipment", response_model=None)
+def submit_shipment(shipment: ShipmentCreate) -> dict[str, int]:
+    """Create a new shipment and return its generated identifier."""
+    new_id = db.create(shipment)
+    # Return id for later use
     return {"id": new_id}
 
-@app.get("/shipment/field/{field}")
-def get_shipment_by_field(field: str, id: int) -> dict[str, Any]:
 
-    if id not in shipments:
-        raise HTTPException(status_code=404, detail="Shipment not found")
+@app.patch("/shipment", response_model=ShipmentRead)
+def update_shipment(shipment_id: int, body: ShipmentUpdate) -> dict[str, str | float | int]:
+    """Update the status of an existing shipment."""
+    db.update(shipment_id, body)
+    return _get_shipment_or_404(shipment_id)
 
-    if field not in shipments[id]:
-        raise HTTPException(status_code=404, detail=f"Field '{field}' not found in shipment {id}")
-
-    return {
-        field: shipments[id][field]
-    }
-
-
-@app.put("/shipment")
-def update_shipment_status(id: int, content: str, weight: float, status: str) -> dict[str, Any]:
-
-    if id not in shipments:
-        raise HTTPException(status_code=404, detail="Shipment not found")
-
-    shipments[id] = {
-        "weight": weight,
-        "content": content,
-        "status": status
-    }
-    return shipments[id]
-
-@app.patch("/shipment")
-def patch_shipment_status(
-    id: int, 
-    body: dict[str, Any]) -> dict[str, Any]:
-
-    if id not in shipments:
-        raise HTTPException(status_code=404, detail="Shipment not found")
-
-    shipment = shipments[id]
-    shipment.update(body)
-
-    shipments[id] = shipment   
-
-    return shipments[id]
 
 @app.delete("/shipment")
-def delete_shipment(id: int) -> dict[str, str]:
+def delete_shipment(shipment_id: int) -> dict[str, str]:
+    """Delete a shipment and confirm the removal."""
+    db.delete(shipment_id)
+    _get_shipment_or_404(shipment_id)
     
-    if id not in shipments:
-        raise HTTPException(status_code=404, detail="Shipment not found")
+    return {"detail": f"Shipment with id #{shipment_id} is deleted!"}
 
-    del shipments[id]
 
-    return {"detail": f"Shipment {id} deleted successfully"}
-
-# Scalar API Documentation
 @app.get("/scalar", include_in_schema=False)
-def get_scalar_docs():
+def get_scalar_docs() -> object:
+    """Serve the Scalar API documentation page."""
     return get_scalar_api_reference(
         openapi_url=app.openapi_url,
         title="Scalar API",
